@@ -1,1 +1,3 @@
 ffmpeg
+sox
+libsox-fmt-all
