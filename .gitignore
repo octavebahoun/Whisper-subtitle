@@ -13,6 +13,9 @@ uploads/*
 .env
 .streamlit/secrets.toml
 
+# Translation cache
+translations_cache.json
+
 # Media Files (inputs/outputs)
 *.mp4
 *.mkv
