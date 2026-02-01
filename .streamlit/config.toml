@@ -1,0 +1,9 @@
+# Configuration Streamlit pour le déploiement
+
+[server]
+headless = true
+port = 8501
+enableCORS = false
+
+[browser]
+gatherUsageStats = false

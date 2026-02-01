@@ -1,0 +1,7 @@
+streamlit==1.53.1
+groq==1.0.0
+openai-whisper==20250625
+torch==2.10.0
+torchaudio==2.10.0
+torchvision==0.25.0
+python-dotenv==1.0.0

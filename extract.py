@@ -1,11 +1,16 @@
 import subprocess
+import sys
 from pathlib import Path
 
-# Chemin vers la vidéo
-video_path = Path("jujutsu_kaisen_ep2.mp4")
+# Chemin vers la vidéo (argument ou par défaut)
+if len(sys.argv) > 1:
+    video_path = Path(sys.argv[1])
+else:
+    print("Usage: python extract.py <video_file>")
+    sys.exit(1)
 
 # Chemin de sortie audio
-audio_path = Path("jujutsu_kaisen_ep2.wav")
+audio_path = video_path.with_suffix(".wav")
 
 # Commande ffmpeg
 command = [

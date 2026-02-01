@@ -1,11 +1,16 @@
 import whisper
+import sys
 from pathlib import Path
 
 # Charger le modèle
 model = whisper.load_model("small")
 
 # Chemin vers l'audio
-audio_path = Path("jujutsu_kaisen_ep1.wav")
+if len(sys.argv) > 1:
+    audio_path = Path(sys.argv[1])
+else:
+    print("Usage: python transcribe.py <audio_file>")
+    sys.exit(1)
 
 # Transcription (japonais, sans traduction)
 result = model.transcribe(
