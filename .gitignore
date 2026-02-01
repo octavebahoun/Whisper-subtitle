@@ -11,6 +11,7 @@ ENV/
 uploads/*
 # Environment Variables
 .env
+.streamlit/secrets.toml
 
 # Media Files (inputs/outputs)
 *.mp4
