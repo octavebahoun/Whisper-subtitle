@@ -20,28 +20,32 @@ def separate_audio(audio_path: Path):
     ]
     
     try:
+        # On utilise -n htdemucs pour être explicite
         subprocess.run(command, check=True)
         
-        # Demucs crée par défaut un dossier 'separated/htdemucs/nom_du_fichier/'
-        # On doit récupérer le fichier 'no_vocals.wav' (qui est l'accompagnement)
+        # Demucs crée un dossier basé sur le nom du modèle (par défaut htdemucs)
+        # On cherche récursivement le fichier no_vocals.wav
         base_name = audio_path.stem
-        output_dir = Path("separated/htdemucs") / base_name
+        separated_path = Path("separated")
         
-        bg_music = output_dir / "no_vocals.wav"
-        vocals = output_dir / "vocals.wav"
+        bg_music = None
+        for p in separated_path.rglob("no_vocals.wav"):
+            if base_name in str(p):
+                bg_music = p
+                break
         
-        if bg_music.exists():
-            # On déplace l'accompagnement vers un nom plus clair dans le dossier uploads
+        if bg_music and bg_music.exists():
             target_bg = audio_path.parent / f"{base_name}_bg.wav"
-            shutil.move(str(bg_music), str(target_bg))
+            shutil.copy(str(bg_music), str(target_bg))
             
-            # Nettoyage
-            shutil.rmtree("separated")
+            # Nettoyage sécurisé
+            if separated_path.exists():
+                shutil.rmtree(separated_path)
             
             print(f"✅ Musique de fond extraite : {target_bg}")
             return target_bg
         else:
-            print("❌ Erreur : Fichiers séparés non trouvés")
+            print(f"❌ Erreur : Flux no_vocals non trouvé dans {separated_path}")
             return None
             
     except Exception as e:

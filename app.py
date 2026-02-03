@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 import shutil
 import os
+import re
+import json
 
 # Import des modules locaux
 from languages import (
@@ -173,6 +175,30 @@ with st.sidebar:
                 value=False,
                 help="Utiliser un audio de référence pour cloner une voix"
             )
+
+            # Option Multi-Speaker Diarisation
+            enable_diarization = st.toggle(
+                "Multi-locuteurs (Diarisation)",
+                value=False,
+                help="Détecte automatiquement les différents personnages et leur attribue des voix différentes"
+            )
+            
+            # --- Nouvelle option : Type d'export ---
+            st.divider()
+            st.subheader("🎬 Export Vidéo")
+            subtitle_type = st.radio(
+                "Incrustation des sous-titres",
+                options=["Activables (Softcode)", "Fixes (Hardcode)"],
+                index=0,
+                help="Softcode : On peut les désactiver. Hardcode : Ils font partie de l'image (meilleure compatibilité)."
+            )
+            is_hardcode = subtitle_type == "Fixes (Hardcode)"
+            
+            if enable_diarization:
+                st.info("🎭 Diarisation activée : les différents personnages auront des voix différentes")
+                num_speakers = st.number_input("Nombre de personnages (approximatif)", min_value=1, max_value=5, value=2)
+            else:
+                num_speakers = 1
             
             if use_voice_clone:
                 ref_audio_file = st.file_uploader(
@@ -272,6 +298,8 @@ if uploaded_file is not None:
         total_steps += 1
         if keep_bg_music:
             total_steps += 1
+        if enable_diarization:
+            total_steps += 1
     
     # Bouton de traitement
     if st.button("🚀 Lancer le traitement automatique", type="primary", use_container_width=True):
@@ -299,6 +327,30 @@ if uploaded_file is not None:
             audio_file = video_path.with_suffix(".wav")
             progress_bar.progress(10)
             step += 1
+            
+            # ===== Étape : Diarisation (Optionnel) =====
+            diarization_data = None
+            if enable_tts and enable_diarization:
+                status_text.info(f"🕵️ Étape {step}/{total_steps} : Diarisation (Identification des personnages)...")
+                
+                result = subprocess.run(
+                    [python_exe, "diarize.py", str(audio_file)],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    try:
+                        import json
+                        diarization_data = json.loads(result.stdout)
+                        st.success("✅ Personnages identifiés !")
+                    except Exception as e:
+                        st.warning(f"⚠️ Erreur lecture diarisation: {e}")
+                else:
+                    st.warning(f"⚠️ Échec de la diarisation")
+                
+                progress_bar.progress(20)
+                step += 1
             
             # ===== Étape 1.5: Séparation audio (Optionnel) =====
             bg_music_file = None
@@ -374,26 +426,79 @@ if uploaded_file is not None:
                 st.error(f"❌ Erreur lors de la traduction:\n{result.stderr}")
                 st.stop()
             
-            progress_bar.progress(65)
+            # Appliquer la diarisation au SRT traduit
+            if diarization_data:
+                with open(srt_translated, "r", encoding="utf-8") as f:
+                    srt_content = f.read()
+                
+                # On ré-utilise une logique de parsing simple pour la cohérence
+                blocks = re.split(r'\n\n+', srt_content.strip())
+                new_blocks = []
+                
+                for block in blocks:
+                    lines = block.split('\n')
+                    if len(lines) >= 3:
+                        time_match = re.search(r'(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})', lines[1])
+                        if time_match:
+                            # Utiliser une fonction de conversion simplifiée
+                            def to_ms(t):
+                                h, m, s, ms = map(int, re.split('[:.,]', t))
+                                return (h * 3600 + m * 60 + s) * 1000 + ms
+                            
+                            start_ms = to_ms(time_match.group(1))
+                            end_ms = to_ms(time_match.group(2))
+                            mid_s = (start_ms + end_ms) / 2 / 1000
+                            
+                            # Trouver le speaker
+                            spk_id = 0
+                            for d_seg in diarization_data:
+                                if d_seg['start'] <= mid_s <= d_seg['end']:
+                                    spk_id = d_seg['speaker']
+                                    break
+                            
+                            # Ajouter le tag au texte
+                            lines[2] = f"[S{spk_id}] {lines[2]}"
+                            new_blocks.append('\n'.join(lines))
+                        else:
+                            new_blocks.append(block)
+                    else:
+                        new_blocks.append(block)
+                
+                with open(srt_translated, "w", encoding="utf-8") as f:
+                    f.write('\n\n'.join(new_blocks))
+
+            progress_bar.progress(70)
             step += 1
             
             # ===== Étape 4 (optionnel): Génération TTS =====
             dubbed_audio = None
             if enable_tts:
                 status_text.info(f"🎙️ Étape {step}/{total_steps} : Génération du doublage (Edge-TTS)...")
-                
                 dubbed_audio = video_path.with_name(f"{video_path.stem}_{target_lang}_dubbed.wav")
                 
+                # Liste des voix pour la langue cible
+                lang_prefix = target_lang
+                target_voices = [v for v in TTS_SPEAKERS.keys() if v.startswith(lang_prefix)]
+                if not target_voices:
+                    if target_lang == "zh": target_voices = [v for v in TTS_SPEAKERS.keys() if v.startswith("zh-CN")]
+                    elif target_lang == "en": target_voices = [v for v in TTS_SPEAKERS.keys() if v.startswith("en-US")]
+                if not target_voices: target_voices = ["fr-FR-DeniseNeural", "fr-FR-HenriNeural"]
+
+                if enable_diarization:
+                    voices_to_pass = [selected_speaker]
+                    other_voices = [v for v in target_voices if v != selected_speaker]
+                    voices_to_pass.extend(other_voices)
+                    speakers_arg = ",".join(voices_to_pass)
+                else:
+                    speakers_arg = selected_speaker
+
                 tts_cmd = [
                     python_exe, "generate.py",
                     str(srt_translated),
                     "-l", target_lang,
-                    "-s", selected_speaker,
+                    "-s", speakers_arg,
                     "-o", str(dubbed_audio)
                 ]
-                
-                # Supprimer auto-detection device pour edge-tts
-                # (déjà fait dans le script generate.py précédent mais mieux de s'assurer ici)
                 
                 result = subprocess.run(
                     tts_cmd,
@@ -427,6 +532,16 @@ if uploaded_file is not None:
                 # Fusion avec doublage
                 output_video = video_path.with_name(f"{video_path.stem}_dubbed.mp4")
                 
+                # Préparation des filtres vidéo/audio
+                v_codec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "22"] if is_hardcode else ["-c:v", "copy"]
+                
+                # Correction pour le filtre subtitles (gérer les espaces et les deux-points)
+                if is_hardcode:
+                    clean_srt_path = str(srt_translated).replace(":", "\\:").replace("'", "'\\''")
+                    v_filter = ["-vf", f"subtitles='{clean_srt_path}'"]
+                else:
+                    v_filter = []
+                
                 if bg_music_file and bg_music_file.exists():
                     # Mixer doublage + musique de fond
                     ffmpeg_cmd = [
@@ -434,50 +549,95 @@ if uploaded_file is not None:
                         "-i", str(video_path),
                         "-i", str(dubbed_audio),
                         "-i", str(bg_music_file),
-                        "-i", str(srt_translated),
-                        "-filter_complex", "[1:a][2:a]amix=inputs=2:duration=first[a]",
+                    ]
+                    
+                    if not is_hardcode:
+                        ffmpeg_cmd.extend(["-i", str(srt_translated)])
+                        
+                    ffmpeg_cmd.extend([
+                        "-filter_complex", "[1:a]volume=1.5[vov];[2:a]volume=0.8[bg];[vov][bg]amix=inputs=2:duration=longest[a]",
+                        *v_filter,
                         "-map", "0:v:0",
                         "-map", "[a]",
-                        "-map", "3:0",
-                        "-c:v", "copy",
+                    ])
+                    
+                    if not is_hardcode:
+                        ffmpeg_cmd.extend(["-map", "3:0"])
+                    
+                    ffmpeg_cmd.extend([
+                        *v_codec,
                         "-c:a", "aac", "-b:a", "192k",
-                        "-c:s", "mov_text",
-                        "-metadata:s:s:0", f"language={ffmpeg_lang}",
-                        "-metadata:s:s:0", f"title={TARGET_LANGUAGES[target_lang]['name']}",
+                    ])
+                    
+                    if not is_hardcode:
+                        ffmpeg_cmd.extend([
+                            "-c:s", "mov_text",
+                            "-metadata:s:s:0", f"language={ffmpeg_lang}",
+                            "-metadata:s:s:0", f"title={TARGET_LANGUAGES[target_lang]['name']}",
+                        ])
+                        
+                    ffmpeg_cmd.extend([
                         "-metadata:s:a:0", f"language={ffmpeg_lang}",
                         str(output_video)
-                    ]
+                    ])
                 else:
                     # Doublage seul (remplacer l'audio original)
                     ffmpeg_cmd = [
                         "ffmpeg", "-y",
                         "-i", str(video_path),
                         "-i", str(dubbed_audio),
-                        "-i", str(srt_translated),
-                        "-map", "0:v:0",
-                        "-map", "1:a:0",
-                        "-map", "2:0",
-                        "-c:v", "copy",
+                    ]
+                    
+                    if not is_hardcode:
+                        ffmpeg_cmd.extend(["-i", str(srt_translated)])
+                        
+                    ffmpeg_cmd.extend([*v_filter])
+                    ffmpeg_cmd.extend(["-map", "0:v:0", "-map", "1:a:0"])
+                    
+                    if not is_hardcode:
+                        ffmpeg_cmd.extend(["-map", "2:0"])
+                        
+                    ffmpeg_cmd.extend([
+                        *v_codec,
                         "-c:a", "aac", "-b:a", "192k",
-                        "-c:s", "mov_text",
-                        "-metadata:s:s:0", f"language={ffmpeg_lang}",
-                        "-metadata:s:s:0", f"title={TARGET_LANGUAGES[target_lang]['name']}",
+                    ])
+                    
+                    if not is_hardcode:
+                        ffmpeg_cmd.extend([
+                            "-c:s", "mov_text",
+                            "-metadata:s:s:0", f"language={ffmpeg_lang}",
+                            "-metadata:s:s:0", f"title={TARGET_LANGUAGES[target_lang]['name']}",
+                        ])
+                        
+                    ffmpeg_cmd.extend([
                         "-metadata:s:a:0", f"language={ffmpeg_lang}",
                         str(output_video)
-                    ]
+                    ])
             else:
                 # Fusion avec sous-titres uniquement
                 output_video = video_path.with_name(f"{video_path.stem}_vostfr.mp4")
-                ffmpeg_cmd = [
-                    "ffmpeg", "-y",
-                    "-i", str(video_path),
-                    "-i", str(srt_translated),
-                    "-c", "copy",
-                    "-c:s", "mov_text",
-                    "-metadata:s:s:0", f"language={ffmpeg_lang}",
-                    "-metadata:s:s:0", f"title={TARGET_LANGUAGES[target_lang]['name']}",
-                    str(output_video)
-                ]
+                
+                if is_hardcode:
+                    clean_srt_path = str(srt_translated).replace(":", "\\:").replace("'", "'\\''")
+                    ffmpeg_cmd = [
+                        "ffmpeg", "-y",
+                        "-i", str(video_path),
+                        "-vf", f"subtitles='{clean_srt_path}'",
+                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                        "-c:a", "copy",
+                        str(output_video)
+                    ]
+                else:
+                    ffmpeg_cmd = [
+                        "ffmpeg", "-y",
+                        "-i", str(video_path),
+                        "-i", str(srt_translated),
+                        "-c", "copy",
+                        "-c:s", "mov_text",
+                        "-metadata:s:s:0", f"language={ffmpeg_lang}",
+                        "-metadata:s:s:0", f"title={TARGET_LANGUAGES[target_lang]['name']}",
+                        str(output_video)
+                    ]
             
             result = subprocess.run(
                 ffmpeg_cmd,
