@@ -30,5 +30,5 @@ EXPOSE 7860
 ENV STREAMLIT_SERVER_PORT=7860
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
 
-# Lancement de l'application
-CMD ["streamlit", "run", "app.py"]
+# Lancement de l'application avec les réglages CORS pour Hugging Face
+CMD ["streamlit", "run", "app.py", "--server.port=7860", "--server.address=0.0.0.0", "--server.enableCORS=false", "--server.enableXsrfProtection=false"]
