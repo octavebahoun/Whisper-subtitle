@@ -160,6 +160,12 @@ with st.sidebar:
                 index=list(speaker_options.keys()).index(default_speaker) if default_speaker in speaker_options else 0,
                 help="Choisissez la voix pour le doublage"
             )
+
+            keep_bg_music = st.toggle(
+                "Garder la musique de fond",
+                value=True,
+                help="Sépare la musique de la voix originale pour la garder dans le doublage"
+            )
             
             # Option clonage vocal
             use_voice_clone = st.toggle(
@@ -183,13 +189,15 @@ with st.sidebar:
                 ref_audio_file = None
                 ref_text = None
         else:
-            selected_speaker = "Chelsie"
+            selected_speaker = "fr-FR-DeniseNeural"
+            keep_bg_music = False
             use_voice_clone = False
             ref_audio_file = None
             ref_text = None
     else:
         enable_tts = False
-        selected_speaker = "Chelsie"
+        selected_speaker = "fr-FR-DeniseNeural"
+        keep_bg_music = False
         use_voice_clone = False
         ref_audio_file = None
         ref_text = None
@@ -259,7 +267,11 @@ if uploaded_file is not None:
         st.video(str(video_path))
     
     # Calculer le nombre d'étapes
-    total_steps = 5 if enable_tts else 4
+    total_steps = 4
+    if enable_tts:
+        total_steps += 1
+        if keep_bg_music:
+            total_steps += 1
     
     # Bouton de traitement
     if st.button("🚀 Lancer le traitement automatique", type="primary", use_container_width=True):
@@ -267,11 +279,12 @@ if uploaded_file is not None:
         status_text = st.empty()
         
         python_exe = sys.executable
+        step = 1
         
         try:
             # ===== Étape 1: Extraction audio =====
-            status_text.info(f"🎵 Étape 1/{total_steps} : Extraction de l'audio...")
-            progress_bar.progress(10)
+            status_text.info(f"🎵 Étape {step}/{total_steps} : Extraction de l'audio...")
+            progress_bar.progress(5)
             
             result = subprocess.run(
                 [python_exe, "extract.py", str(video_path)],
@@ -284,18 +297,39 @@ if uploaded_file is not None:
                 st.stop()
             
             audio_file = video_path.with_suffix(".wav")
-            progress_bar.progress(20)
+            progress_bar.progress(10)
+            step += 1
+            
+            # ===== Étape 1.5: Séparation audio (Optionnel) =====
+            bg_music_file = None
+            if enable_tts and keep_bg_music:
+                status_text.info(f"🎵 Étape {step}/{total_steps} : Séparation voix/musique (Demucs)...")
+                
+                result = subprocess.run(
+                    [python_exe, "separate.py", str(audio_file)],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    bg_music_file = audio_file.parent / f"{audio_file.stem}_bg.wav"
+                    st.success("✅ Musique de fond isolée !")
+                else:
+                    st.warning(f"⚠️ Échec de la séparation : {result.stderr}")
+                
+                progress_bar.progress(25)
+                step += 1
             
             # ===== Étape 2: Transcription =====
             if fast_mode:
-                status_text.info(f"🎤 Étape 2/{total_steps} : Transcription API ({source_display})...")
+                status_text.info(f"🎤 Étape {step}/{total_steps} : Transcription API ({source_display})...")
                 transcribe_cmd = [
                     python_exe, "transcribe_api.py", 
                     str(audio_file),
                     "-l", source_lang
                 ]
             else:
-                status_text.info(f"🎤 Étape 2/{total_steps} : Transcription locale ({source_display})...")
+                status_text.info(f"🎤 Étape {step}/{total_steps} : Transcription locale ({source_display})...")
                 transcribe_cmd = [
                     python_exe, "transcribe.py", 
                     str(audio_file),
@@ -303,7 +337,7 @@ if uploaded_file is not None:
                     "-m", model_size
                 ]
             
-            progress_bar.progress(25)
+            progress_bar.progress(40)
             
             result = subprocess.run(
                 transcribe_cmd,
@@ -316,11 +350,11 @@ if uploaded_file is not None:
                 st.stop()
             
             srt_file = video_path.with_suffix(".srt")
-            progress_bar.progress(40)
+            progress_bar.progress(50)
+            step += 1
             
             # ===== Étape 3: Traduction =====
-            status_text.info(f"🌐 Étape 3/{total_steps} : Traduction → {target_display}...")
-            progress_bar.progress(45)
+            status_text.info(f"🌐 Étape {step}/{total_steps} : Traduction → {target_display}...")
             
             srt_translated = video_path.with_name(f"{video_path.stem}_{target_lang}.srt")
             
@@ -340,13 +374,13 @@ if uploaded_file is not None:
                 st.error(f"❌ Erreur lors de la traduction:\n{result.stderr}")
                 st.stop()
             
-            progress_bar.progress(60)
+            progress_bar.progress(65)
+            step += 1
             
             # ===== Étape 4 (optionnel): Génération TTS =====
             dubbed_audio = None
             if enable_tts:
-                status_text.info(f"🎙️ Étape 4/{total_steps} : Génération du doublage (Qwen3-TTS)...")
-                progress_bar.progress(65)
+                status_text.info(f"🎙️ Étape {step}/{total_steps} : Génération du doublage (Edge-TTS)...")
                 
                 dubbed_audio = video_path.with_name(f"{video_path.stem}_{target_lang}_dubbed.wav")
                 
@@ -355,18 +389,11 @@ if uploaded_file is not None:
                     str(srt_translated),
                     "-l", target_lang,
                     "-s", selected_speaker,
-                    "-o", str(dubbed_audio),
-                    "-d", "auto"
+                    "-o", str(dubbed_audio)
                 ]
                 
-                # Ajouter l'audio de référence si fourni
-                if use_voice_clone and ref_audio_file and ref_text:
-                    # Sauvegarder l'audio de référence
-                    ref_path = WORK_DIR / "ref_audio.wav"
-                    with open(ref_path, "wb") as f:
-                        f.write(ref_audio_file.getbuffer())
-                    
-                    tts_cmd.extend(["--ref-audio", str(ref_path), "--ref-text", ref_text])
+                # Supprimer auto-detection device pour edge-tts
+                # (déjà fait dans le script generate.py précédent mais mieux de s'assurer ici)
                 
                 result = subprocess.run(
                     tts_cmd,
@@ -380,11 +407,12 @@ if uploaded_file is not None:
                 else:
                     st.success("🎙️ Doublage généré avec succès !")
                 
-                progress_bar.progress(80)
+                progress_bar.progress(85)
+                step += 1
             
             # ===== Étape finale: Fusion vidéo =====
-            status_text.info(f"🎬 Étape {total_steps}/{total_steps} : Fusion des sous-titres avec la vidéo...")
-            progress_bar.progress(85)
+            status_text.info(f"🎬 Étape {step}/{total_steps} : Fusion finale avec la vidéo...")
+            progress_bar.progress(90)
             
             # Mapper le code langue vers le code ISO 639-2 pour FFmpeg
             lang_map = {
@@ -396,24 +424,47 @@ if uploaded_file is not None:
             ffmpeg_lang = lang_map.get(target_lang, "und")
             
             if dubbed_audio and dubbed_audio.exists():
-                # Fusion avec doublage (remplacer l'audio)
+                # Fusion avec doublage
                 output_video = video_path.with_name(f"{video_path.stem}_dubbed.mp4")
-                ffmpeg_cmd = [
-                    "ffmpeg", "-y",
-                    "-i", str(video_path),
-                    "-i", str(dubbed_audio),
-                    "-i", str(srt_translated),
-                    "-map", "0:v:0",
-                    "-map", "1:a:0",
-                    "-map", "2:0",
-                    "-c:v", "copy",
-                    "-c:a", "aac", "-b:a", "192k",
-                    "-c:s", "mov_text",
-                    "-metadata:s:s:0", f"language={ffmpeg_lang}",
-                    "-metadata:s:s:0", f"title={TARGET_LANGUAGES[target_lang]['name']}",
-                    "-metadata:s:a:0", f"language={ffmpeg_lang}",
-                    str(output_video)
-                ]
+                
+                if bg_music_file and bg_music_file.exists():
+                    # Mixer doublage + musique de fond
+                    ffmpeg_cmd = [
+                        "ffmpeg", "-y",
+                        "-i", str(video_path),
+                        "-i", str(dubbed_audio),
+                        "-i", str(bg_music_file),
+                        "-i", str(srt_translated),
+                        "-filter_complex", "[1:a][2:a]amix=inputs=2:duration=first[a]",
+                        "-map", "0:v:0",
+                        "-map", "[a]",
+                        "-map", "3:0",
+                        "-c:v", "copy",
+                        "-c:a", "aac", "-b:a", "192k",
+                        "-c:s", "mov_text",
+                        "-metadata:s:s:0", f"language={ffmpeg_lang}",
+                        "-metadata:s:s:0", f"title={TARGET_LANGUAGES[target_lang]['name']}",
+                        "-metadata:s:a:0", f"language={ffmpeg_lang}",
+                        str(output_video)
+                    ]
+                else:
+                    # Doublage seul (remplacer l'audio original)
+                    ffmpeg_cmd = [
+                        "ffmpeg", "-y",
+                        "-i", str(video_path),
+                        "-i", str(dubbed_audio),
+                        "-i", str(srt_translated),
+                        "-map", "0:v:0",
+                        "-map", "1:a:0",
+                        "-map", "2:0",
+                        "-c:v", "copy",
+                        "-c:a", "aac", "-b:a", "192k",
+                        "-c:s", "mov_text",
+                        "-metadata:s:s:0", f"language={ffmpeg_lang}",
+                        "-metadata:s:s:0", f"title={TARGET_LANGUAGES[target_lang]['name']}",
+                        "-metadata:s:a:0", f"language={ffmpeg_lang}",
+                        str(output_video)
+                    ]
             else:
                 # Fusion avec sous-titres uniquement
                 output_video = video_path.with_name(f"{video_path.stem}_vostfr.mp4")
