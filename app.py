@@ -21,6 +21,21 @@ from translation_cache import get_cache_stats, clear_cache
 # Langues supportées par Qwen3-TTS
 TTS_LANGUAGES = ["fr", "en", "ja", "zh", "ko", "de", "es", "it", "pt", "ru"]
 
+# Speakers disponibles pour Edge-TTS
+TTS_SPEAKERS = {
+    # Français
+    "fr-FR-DeniseNeural": {"gender": "female", "native": "Français", "label": "Denise (FR)"},
+    "fr-FR-HenriNeural": {"gender": "male", "native": "Français", "label": "Henri (FR)"},
+    "fr-FR-EloiseNeural": {"gender": "female", "native": "Français", "label": "Eloise (FR)"},
+    # Anglais
+    "en-US-AriaNeural": {"gender": "female", "native": "Anglais", "label": "Aria (US)"},
+    "en-US-GuyNeural": {"gender": "male", "native": "Anglais", "label": "Guy (US)"},
+    "en-US-JennyNeural": {"gender": "female", "native": "Anglais", "label": "Jenny (US)"},
+    # Japonais
+    "ja-JP-NanamiNeural": {"gender": "female", "native": "Japonais", "label": "Nanami (JP)"},
+    "ja-JP-KeitaNeural": {"gender": "male", "native": "Japonais", "label": "Keita (JP)"},
+}
+
 # Configuration de la clé API depuis les secrets Streamlit
 if "GROQ_API_KEY" not in st.secrets:
     st.error("❌ Clé API Groq manquante. Configurez GROQ_API_KEY dans les secrets.")
@@ -111,9 +126,44 @@ with st.sidebar:
         if enable_tts:
             st.info("⚠️ Le doublage peut prendre plusieurs minutes sur CPU")
             
+            # Sélection du type de voix
+            st.markdown("**Type de voix**")
+            
+            # Séparer les voix par genre
+            female_voices = [name for name, info in TTS_SPEAKERS.items() if info["gender"] == "female"]
+            male_voices = [name for name, info in TTS_SPEAKERS.items() if info["gender"] == "male"]
+            
+            gender = st.radio(
+                "Genre",
+                options=["Féminin", "Masculin"],
+                horizontal=True,
+                label_visibility="collapsed"
+            )
+            
+            if gender == "Féminin":
+                available_speakers = female_voices
+                default_speaker = "fr-FR-DeniseNeural"
+            else:
+                available_speakers = male_voices
+                default_speaker = "fr-FR-HenriNeural"
+            
+            # Formater les options avec label
+            speaker_options = {
+                name: TTS_SPEAKERS[name]['label']
+                for name in available_speakers
+            }
+            
+            selected_speaker = st.selectbox(
+                "Voix",
+                options=list(speaker_options.keys()),
+                format_func=lambda x: speaker_options[x],
+                index=list(speaker_options.keys()).index(default_speaker) if default_speaker in speaker_options else 0,
+                help="Choisissez la voix pour le doublage"
+            )
+            
             # Option clonage vocal
             use_voice_clone = st.toggle(
-                "Clonage vocal",
+                "Clonage vocal (expérimental)",
                 value=False,
                 help="Utiliser un audio de référence pour cloner une voix"
             )
@@ -133,11 +183,13 @@ with st.sidebar:
                 ref_audio_file = None
                 ref_text = None
         else:
+            selected_speaker = "Chelsie"
             use_voice_clone = False
             ref_audio_file = None
             ref_text = None
     else:
         enable_tts = False
+        selected_speaker = "Chelsie"
         use_voice_clone = False
         ref_audio_file = None
         ref_text = None
@@ -197,7 +249,8 @@ if uploaded_file is not None:
         st.info(f"⚡ {'API Groq' if fast_mode else f'Whisper {model_size}'}")
     with col3:
         if enable_tts:
-            st.info("🎙️ Doublage activé")
+            gender_emoji = "👩" if TTS_SPEAKERS[selected_speaker]["gender"] == "female" else "👨"
+            st.info(f"🎙️ Doublage: {gender_emoji} {selected_speaker}")
         else:
             st.info("📝 Sous-titres uniquement")
     
@@ -301,6 +354,7 @@ if uploaded_file is not None:
                     python_exe, "generate.py",
                     str(srt_translated),
                     "-l", target_lang,
+                    "-s", selected_speaker,
                     "-o", str(dubbed_audio),
                     "-d", "auto"
                 ]
