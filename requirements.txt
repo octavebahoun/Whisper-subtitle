@@ -5,16 +5,20 @@ python-dotenv==1.0.0
 
 # Whisper (transcription locale)
 openai-whisper==20250625
-torch==2.10.0
-torchaudio==2.10.0
-torchvision==0.25.0
+torch
+torchaudio
+torchvision
 
 # TTS (doublage)
-edge-tts==6.1.12
-pydub==0.25.1
+edge-tts>=6.1.12
 soundfile>=0.12.0
 numpy>=1.24.0
 tqdm>=4.65.0
 
-# Optionnel: Flash Attention pour GPU (accélération)
-# pip install flash-attn --no-build-isolation
+# Séparation Audio & Diarisation
+demucs
+simple-diarizer
+
+# Utilitaires
+pathlib
+regex
