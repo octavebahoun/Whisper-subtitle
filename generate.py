@@ -1,6 +1,6 @@
 """
 Script de génération de doublage audio à partir de sous-titres SRT.
-Utilise edge-tts pour la synthèse vocale et pydub pour l'assemblage.
+Utilise edge-tts pour la synthèse vocale et numpy/soundfile pour l'assemblage (compatible Python 3.13+).
 """
 
 import asyncio
@@ -9,18 +9,20 @@ import argparse
 import sys
 import re
 import os
+import subprocess
 from pathlib import Path
-from pydub import AudioSegment
+import numpy as np
+import soundfile as sf
 from tqdm import tqdm
 
-def parse_srt_time(time_str: str) -> int:
-    """Convertit un timestamp SRT en millisecondes."""
+def parse_srt_time(time_str: str) -> float:
+    """Convertit un timestamp SRT en secondes."""
     # Format: HH:MM:SS,mmm
     match = re.match(r'(\d{2}):(\d{2}):(\d{2})[,.](\d{3})', time_str)
     if match:
         h, m, s, ms = map(int, match.groups())
-        return (h * 3600 + m * 60 + s) * 1000 + ms
-    return 0
+        return h * 3600 + m * 60 + s + ms / 1000
+    return 0.0
 
 def parse_srt(srt_path: Path):
     """Parse un fichier SRT et retourne une liste de segments."""
@@ -60,62 +62,84 @@ def parse_srt(srt_path: Path):
                 continue
     return segments
 
-async def generate_segment_mp3(text: str, speaker: str, output_path: str):
-    """Génère un fichier MP3 pour un segment de texte."""
+async def generate_segment_audio(text: str, speaker: str, output_path: Path):
+    """Génère un fichier audio pour un segment de texte et le convertit en WAV."""
+    temp_mp3 = output_path.with_suffix(".mp3")
     communicate = edge_tts.Communicate(text, speaker)
-    await communicate.save(output_path)
+    await communicate.save(str(temp_mp3))
+    
+    # Conversion MP3 -> WAV via FFmpeg (car soundfile lit mieux le WAV)
+    subprocess.run([
+        "ffmpeg", "-y", "-i", str(temp_mp3), 
+        "-ar", "24000", "-ac", "1", str(output_path)
+    ], capture_output=True, check=True)
+    
+    # Nettoyage du MP3 temporaire
+    if temp_mp3.exists():
+        temp_mp3.unlink()
 
 async def generate_all_segments(segments, speaker, temp_dir):
-    """Génère les fichiers audio pour tous les segments en parallèle (avec limite)."""
-    tasks = []
-    # Créer le dossier temp si besoin
+    """Génère les fichiers audio pour tous les segments en parallèle."""
     temp_dir.mkdir(exist_ok=True)
-    
-    semaphore = asyncio.Semaphore(5) # Limiter le nombre de requêtes simultanées
+    semaphore = asyncio.Semaphore(5)
 
     async def sem_generate(segment, index):
         async with semaphore:
-            path = temp_dir / f"seg_{index}.mp3"
-            await generate_segment_mp3(segment['text'], speaker, str(path))
+            path = temp_dir / f"seg_{index}.wav"
+            await generate_segment_audio(segment['text'], speaker, path)
             return path
 
-    for i, seg in enumerate(segments):
-        tasks.append(sem_generate(seg, i))
+    tasks = [sem_generate(seg, i) for i, seg in enumerate(segments)]
     
-    # Utiliser tqdm pour suivre la progression
     paths = []
+    # Attendre toutes les tâches et garder l'ordre
     for f in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="🎙️ Synthèse vocale"):
-        paths.append(await f)
+        await f
     
-    # Il faut les trier car as_completed ne garantit pas l'ordre
-    # On reconstruit la liste triée par index
-    return [temp_dir / f"seg_{i}.mp3" for i in range(len(segments))]
+    return [temp_dir / f"seg_{i}.wav" for i in range(len(segments))]
 
 def assemble_audio(segments, audio_paths, output_path):
-    """Assemble les segments audio en respectant les timestamps."""
+    """Assemble les segments audio avec numpy pour éviter la dépendance audioop/pydub."""
     if not audio_paths:
         return
 
-    # Durée totale estimée (dernier segment end + 1s)
-    total_duration = segments[-1]['end'] + 1000
+    sample_rate = 24000
+    # Durée totale en secondes (dernier segment end + 1s)
+    total_duration = segments[-1]['end'] + 1.0
     
-    # Créer une piste de silence
-    combined = AudioSegment.silent(duration=total_duration)
+    # Créer un array de zéros pour l'audio final
+    final_audio = np.zeros(int(total_duration * sample_rate))
 
     for seg, path in zip(segments, audio_paths):
         if not path.exists():
             continue
             
         try:
-            segment_audio = AudioSegment.from_file(path)
-            # Positionner le segment à son timestamp de début
-            # Overlay permet de superposer au silence
-            combined = combined.overlay(segment_audio, position=seg['start'])
+            data, sr = sf.read(str(path))
+            if sr != sample_rate:
+                # On suppose que FFmpeg a bien fait la conversion à 24000
+                pass
+            
+            start_sample = int(seg['start'] * sample_rate)
+            end_sample = start_sample + len(data)
+            
+            if end_sample > len(final_audio):
+                # Étendre l'audio si nécessaire
+                padding = np.zeros(end_sample - len(final_audio))
+                final_audio = np.concatenate([final_audio, padding])
+            
+            # Superposer l'audio (mixage simple)
+            final_audio[start_sample:end_sample] += data
         except Exception as e:
             print(f"⚠️ Erreur sur le segment {path}: {e}")
 
+    # Normalisation pour éviter le clipping
+    max_val = np.max(np.abs(final_audio))
+    if max_val > 0:
+        final_audio = final_audio / max_val * 0.9
+
     # Sauvegarder le résultat final
-    combined.export(output_path, format="wav")
+    sf.write(str(output_path), final_audio, sample_rate)
 
 async def run_dubbing(srt_file, speaker, output_file):
     srt_path = Path(srt_file)
@@ -135,8 +159,8 @@ async def run_dubbing(srt_file, speaker, output_file):
         assemble_audio(segments, audio_paths, output_path)
         print(f"✅ Terminé ! Audio généré : {output_path}")
     finally:
-        # Nettoyage des fichiers temporaires
-        for p in temp_dir.glob("*.mp3"):
+        # Nettoyage
+        for p in temp_dir.glob("*.wav"):
             try: p.unlink()
             except: pass
         if temp_dir.exists():
@@ -157,3 +181,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
