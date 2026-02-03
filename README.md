@@ -1,3 +1,13 @@
+---
+title: Whisper Subtitle Generator
+emoji: 🎬
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # 🎬 Whisper Subtitle Generator
 
 Générateur automatique de sous-titres multilingues et doublage IA pour vidéos.
