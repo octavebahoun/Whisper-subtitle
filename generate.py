@@ -14,62 +14,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 from tqdm import tqdm
-
-def parse_srt_time(time_str: str) -> float:
-    """Convertit un timestamp SRT en secondes."""
-    # Format: HH:MM:SS,mmm
-    match = re.match(r'(\d{2}):(\d{2}):(\d{2})[,.](\d{3})', time_str)
-    if match:
-        h, m, s, ms = map(int, match.groups())
-        return h * 3600 + m * 60 + s + ms / 1000
-    return 0.0
-
-def parse_srt(srt_path: Path):
-    """Parse un fichier SRT et retourne une liste de segments."""
-    segments = []
-    if not srt_path.exists():
-        return segments
-
-    with open(srt_path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    # Séparer les blocs par double retour à la ligne
-    blocks = re.split(r'\n\n+', content.strip())
-
-    for block in blocks:
-        lines = block.strip().split('\n')
-        if len(lines) >= 3:
-            try:
-                # Parser les timestamps
-                time_match = re.match(
-                    r'(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})',
-                    lines[1]
-                )
-                if time_match:
-                    start = parse_srt_time(time_match.group(1))
-                    end = parse_srt_time(time_match.group(2))
-                    text = ' '.join(lines[2:]).strip()
-                    
-                    # Détection de speaker ID si présent dans le texte (format: [S1] Texte)
-                    speaker_id = 0
-                    speaker_match = re.match(r'\[S(\d+)\]\s*(.*)', text)
-                    if speaker_match:
-                        speaker_id = int(speaker_match.group(1))
-                        text = speaker_match.group(2)
-                    
-                    # Nettoyer les balises HTML/SRT
-                    text = re.sub(r'<[^>]+>', '', text)
-                    
-                    if text:
-                        segments.append({
-                            'start': start,
-                            'end': end,
-                            'text': text,
-                            'speaker_id': speaker_id
-                        })
-            except Exception:
-                continue
-    return segments
+import srt_utils
 
 async def generate_segment_audio(text: str, speaker: str, output_path: Path):
     """Génère un fichier audio pour un segment de texte et le convertit en WAV."""
@@ -166,7 +111,7 @@ async def run_dubbing(srt_file, speakers, output_file):
     output_path = Path(output_file)
     
     print(f"📖 Lecture des sous-titres : {srt_path.name}")
-    segments = parse_srt(srt_path)
+    segments = srt_utils.parse_srt(srt_path)
     if not segments:
         print("❌ Aucun segment trouvé.")
         return

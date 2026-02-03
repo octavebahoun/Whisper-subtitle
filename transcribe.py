@@ -9,15 +9,7 @@ import argparse
 from pathlib import Path
 
 from languages import WHISPER_LANGUAGES, get_whisper_code
-
-
-def format_time(t: float) -> str:
-    """Convertit les secondes en format SRT (HH:MM:SS,mmm)"""
-    h = int(t // 3600)
-    m = int((t % 3600) // 60)
-    s = int(t % 60)
-    ms = int((t - int(t)) * 1000)
-    return f"{h:02}:{m:02}:{s:02},{ms:03}"
+import srt_utils
 
 
 def transcribe_local(audio_path: Path, language: str = "ja", model_size: str = "small") -> Path:
@@ -65,15 +57,15 @@ def transcribe_local(audio_path: Path, language: str = "ja", model_size: str = "
     # Sauvegarde du SRT
     srt_path = audio_path.with_suffix(".srt")
     
-    with open(srt_path, "w", encoding="utf-8") as f:
-        for i, segment in enumerate(result["segments"], start=1):
-            start = segment["start"]
-            end = segment["end"]
-            text = segment["text"].strip()
-            
-            f.write(f"{i}\n")
-            f.write(f"{format_time(start)} --> {format_time(end)}\n")
-            f.write(text + "\n\n")
+    srt_segments = []
+    for segment in result["segments"]:
+        srt_segments.append({
+            "start": segment["start"],
+            "end": segment["end"],
+            "text": segment["text"].strip()
+        })
+
+    srt_utils.write_srt(srt_segments, srt_path)
     
     print(f"✅ Sous-titres générés : {srt_path}")
     return srt_path

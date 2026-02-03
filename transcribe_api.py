@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 import time
 
 from languages import WHISPER_LANGUAGES, get_whisper_code
+import srt_utils
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -41,15 +42,6 @@ HALLUCINATION_PATTERNS = [
     "merci d'avoir regardé",
     "abonnez-vous",
 ]
-
-
-def format_time(seconds: float) -> str:
-    """Convertit les secondes en format SRT (HH:MM:SS,mmm)"""
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    ms = int((seconds - int(seconds)) * 1000)
-    return f"{h:02}:{m:02}:{s:02},{ms:03}"
 
 
 def get_audio_duration(audio_path: Path) -> float:
@@ -260,25 +252,24 @@ def transcribe_with_api(audio_path: Path, language: str = "ja") -> Path:
         
         # Créer le fichier SRT
         srt_path = audio_path.with_suffix(".srt")
-        valid_segments = 0
+        valid_segments_list = []
         hallucination_count = 0
         
-        with open(srt_path, "w", encoding="utf-8") as f:
-            segment_index = 1
-            for segment in all_segments:
-                start = segment.get('start', 0)
-                end = segment.get('end', 0)
-                text = segment.get('text', '').strip()
-                
-                if is_hallucination(text, all_texts):
-                    hallucination_count += 1
-                    continue
-                
-                f.write(f"{segment_index}\n")
-                f.write(f"{format_time(start)} --> {format_time(end)}\n")
-                f.write(f"{text}\n\n")
-                segment_index += 1
-                valid_segments += 1
+        for segment in all_segments:
+            text = segment.get('text', '').strip()
+
+            if is_hallucination(text, all_texts):
+                hallucination_count += 1
+                continue
+
+            valid_segments_list.append({
+                "start": segment.get('start', 0),
+                "end": segment.get('end', 0),
+                "text": text
+            })
+
+        srt_utils.write_srt(valid_segments_list, srt_path)
+        valid_segments = len(valid_segments_list)
         
         if hallucination_count > 0:
             print(f"🔍 {hallucination_count} hallucinations filtrées")

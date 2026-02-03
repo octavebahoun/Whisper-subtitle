@@ -21,6 +21,7 @@ from languages import (
     WHISPER_LANGUAGES,
     TARGET_LANGUAGES
 )
+import srt_utils
 
 # Charger les variables d'environnement du fichier .env
 load_dotenv()
@@ -109,50 +110,25 @@ def translate_srt(
     print(f"📄 Source: {srt_input}")
     print(f"📄 Sortie: {srt_output}")
     
-    with open(srt_input, "r", encoding="utf-8") as f_in, \
-         open(srt_output, "w", encoding="utf-8") as f_out:
-        
-        block = []
-        for line in f_in:
-            line_strip = line.strip()
-            if line_strip == "":
-                if len(block) >= 3:
-                    num = block[0]
-                    times = block[1]
-                    text = " ".join(block[2:])
-                    
-                    # Vérifier si c'est une traduction depuis le cache
-                    cached = get_cached_translation(text, source_lang, target_lang)
-                    
-                    # Traduction via API Groq (avec cache intégré)
-                    text_translated = translate_text(text, source_lang, target_lang)
-                    
-                    if cached:
-                        cached_count += 1
-                        print(f"  💾 [{num}] (cache)")
-                    else:
-                        translated_count += 1
-                        print(f"  ✅ [{num}] Traduit")
-                    
-                    f_out.write(f"{num}\n{times}\n{text_translated}\n\n")
-                block = []
-            else:
-                block.append(line_strip)
-        
-        # Traiter le dernier bloc s'il existe
-        if block and len(block) >= 3:
+    with open(srt_output, "w", encoding="utf-8") as f_out:
+        for block in srt_utils.read_srt_blocks(srt_input):
             num = block[0]
             times = block[1]
             text = " ".join(block[2:])
             
+            # Vérifier si c'est une traduction depuis le cache
             cached = get_cached_translation(text, source_lang, target_lang)
+
+            # Traduction via API Groq (avec cache intégré)
             text_translated = translate_text(text, source_lang, target_lang)
             
             if cached:
                 cached_count += 1
+                print(f"  💾 [{num}] (cache)")
             else:
                 translated_count += 1
-                
+                print(f"  ✅ [{num}] Traduit")
+
             f_out.write(f"{num}\n{times}\n{text_translated}\n\n")
     
     return translated_count, cached_count

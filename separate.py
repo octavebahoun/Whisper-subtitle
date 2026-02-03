@@ -47,6 +47,12 @@ def separate_audio(audio_path: Path):
         else:
             print(f"❌ Erreur : Flux no_vocals non trouvé dans {separated_path}")
             return None
+
+    except FileNotFoundError:
+        print("❌ Erreur : Commande 'demucs' introuvable.")
+        print("ℹ️  Assurez-vous que demucs est installé et dans le PATH.")
+        print("ℹ️  pip install demucs")
+        return None
             
     except Exception as e:
         print(f"❌ Erreur lors de la séparation : {e}")

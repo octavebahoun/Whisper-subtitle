@@ -19,6 +19,7 @@ from languages import (
     get_language_display
 )
 from translation_cache import get_cache_stats, clear_cache
+import srt_utils
 
 # Langues supportées par Qwen3-TTS
 TTS_LANGUAGES = ["fr", "en", "ja", "zh", "ko", "de", "es", "it", "pt", "ru"]
@@ -43,10 +44,9 @@ if "GROQ_API_KEY" not in st.secrets:
     st.error("❌ Clé API Groq manquante. Configurez GROQ_API_KEY dans les secrets.")
     st.stop()
 
-# Créer un fichier .env temporaire pour les scripts
-env_content = f"GROQ_API_KEY={st.secrets['GROQ_API_KEY']}"
-with open(".env", "w") as f:
-    f.write(env_content)
+# Préparation de l'environnement pour les sous-processus
+subprocess_env = os.environ.copy()
+subprocess_env["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 
 st.set_page_config(page_title="Auto VOSTFR + Doublage", page_icon="🎬", layout="wide")
 
@@ -317,7 +317,8 @@ if uploaded_file is not None:
             result = subprocess.run(
                 [python_exe, "extract.py", str(video_path)],
                 capture_output=True,
-                text=True
+                text=True,
+                env=subprocess_env
             )
             
             if result.returncode != 0:
@@ -336,7 +337,8 @@ if uploaded_file is not None:
                 result = subprocess.run(
                     [python_exe, "diarize.py", str(audio_file)],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    env=subprocess_env
                 )
                 
                 if result.returncode == 0:
@@ -360,7 +362,8 @@ if uploaded_file is not None:
                 result = subprocess.run(
                     [python_exe, "separate.py", str(audio_file)],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    env=subprocess_env
                 )
                 
                 if result.returncode == 0:
@@ -394,7 +397,8 @@ if uploaded_file is not None:
             result = subprocess.run(
                 transcribe_cmd,
                 capture_output=True,
-                text=True
+                text=True,
+                env=subprocess_env
             )
             
             if result.returncode != 0:
@@ -419,7 +423,8 @@ if uploaded_file is not None:
                     "-o", str(srt_translated)
                 ],
                 capture_output=True,
-                text=True
+                text=True,
+                env=subprocess_env
             )
             
             if result.returncode != 0:
@@ -428,44 +433,21 @@ if uploaded_file is not None:
             
             # Appliquer la diarisation au SRT traduit
             if diarization_data:
-                with open(srt_translated, "r", encoding="utf-8") as f:
-                    srt_content = f.read()
+                segments = srt_utils.parse_srt(srt_translated)
                 
-                # On ré-utilise une logique de parsing simple pour la cohérence
-                blocks = re.split(r'\n\n+', srt_content.strip())
-                new_blocks = []
+                for seg in segments:
+                    mid_s = (seg['start'] + seg['end']) / 2
+
+                    # Trouver le speaker
+                    spk_id = 0
+                    for d_seg in diarization_data:
+                        if d_seg['start'] <= mid_s <= d_seg['end']:
+                            spk_id = d_seg['speaker']
+                            break
+
+                    seg['speaker_id'] = spk_id
                 
-                for block in blocks:
-                    lines = block.split('\n')
-                    if len(lines) >= 3:
-                        time_match = re.search(r'(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})', lines[1])
-                        if time_match:
-                            # Utiliser une fonction de conversion simplifiée
-                            def to_ms(t):
-                                h, m, s, ms = map(int, re.split('[:.,]', t))
-                                return (h * 3600 + m * 60 + s) * 1000 + ms
-                            
-                            start_ms = to_ms(time_match.group(1))
-                            end_ms = to_ms(time_match.group(2))
-                            mid_s = (start_ms + end_ms) / 2 / 1000
-                            
-                            # Trouver le speaker
-                            spk_id = 0
-                            for d_seg in diarization_data:
-                                if d_seg['start'] <= mid_s <= d_seg['end']:
-                                    spk_id = d_seg['speaker']
-                                    break
-                            
-                            # Ajouter le tag au texte
-                            lines[2] = f"[S{spk_id}] {lines[2]}"
-                            new_blocks.append('\n'.join(lines))
-                        else:
-                            new_blocks.append(block)
-                    else:
-                        new_blocks.append(block)
-                
-                with open(srt_translated, "w", encoding="utf-8") as f:
-                    f.write('\n\n'.join(new_blocks))
+                srt_utils.write_srt(segments, srt_translated)
 
             progress_bar.progress(70)
             step += 1
@@ -503,7 +485,8 @@ if uploaded_file is not None:
                 result = subprocess.run(
                     tts_cmd,
                     capture_output=True,
-                    text=True
+                    text=True,
+                    env=subprocess_env
                 )
                 
                 if result.returncode != 0:
@@ -642,7 +625,8 @@ if uploaded_file is not None:
             result = subprocess.run(
                 ffmpeg_cmd,
                 capture_output=True,
-                text=True
+                text=True,
+                env=subprocess_env
             )
             
             if result.returncode != 0:

@@ -41,6 +41,11 @@ def run_diarization(audio_path: Path, num_speakers=None):
             
         print(f"✅ Diarisation terminée : {len(formatted_segments)} segments identifiés", file=sys.stderr)
         return formatted_segments
+
+    except ImportError:
+        print("❌ Erreur : Module 'simple_diarizer' manquant.", file=sys.stderr)
+        print("ℹ️  Installez-le avec : pip install simple-diarizer", file=sys.stderr)
+        return []
         
     except Exception as e:
         print(f"⚠️ Erreur Diarisation : {e}", file=sys.stderr)
