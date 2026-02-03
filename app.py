@@ -230,6 +230,7 @@ with st.sidebar:
             use_voice_clone = False
             ref_audio_file = None
             ref_text = None
+            is_hardcode = False # Définir par défaut ici
     else:
         enable_tts = False
         selected_speaker = "fr-FR-DeniseNeural"
@@ -237,6 +238,7 @@ with st.sidebar:
         use_voice_clone = False
         ref_audio_file = None
         ref_text = None
+        is_hardcode = False # Définir par défaut ici aussi
         st.warning(f"⚠️ TTS non disponible pour {TARGET_LANGUAGES[target_lang]['name']}")
         st.caption(f"Langues TTS: {', '.join(TTS_LANGUAGES)}")
     
