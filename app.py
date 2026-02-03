@@ -38,15 +38,25 @@ TTS_SPEAKERS = {
     "ja-JP-KeitaNeural": {"gender": "male", "native": "Japonais", "label": "Keita (JP)"},
 }
 
-# Configuration de la clé API depuis les secrets Streamlit
-if "GROQ_API_KEY" not in st.secrets:
-    st.error("❌ Clé API Groq manquante. Configurez GROQ_API_KEY dans les secrets.")
+# Configuration de la clé API (Supporte st.secrets et les variables d'environnement)
+groq_api_key = None
+
+if "GROQ_API_KEY" in os.environ:
+    groq_api_key = os.environ.get("GROQ_API_KEY")
+else:
+    try:
+        if "GROQ_API_KEY" in st.secrets:
+            groq_api_key = st.secrets["GROQ_API_KEY"]
+    except Exception:
+        pass
+
+if not groq_api_key:
+    st.error("❌ Clé API Groq manquante. Configurez GROQ_API_KEY dans les secrets (Hugging Face) ou secrets.toml (Local).")
     st.stop()
 
-# Créer un fichier .env temporaire pour les scripts
-env_content = f"GROQ_API_KEY={st.secrets['GROQ_API_KEY']}"
+# Créer un fichier .env temporaire pour les scripts esclaves
 with open(".env", "w") as f:
-    f.write(env_content)
+    f.write(f"GROQ_API_KEY={groq_api_key}")
 
 st.set_page_config(page_title="Auto VOSTFR + Doublage", page_icon="🎬", layout="wide")
 
