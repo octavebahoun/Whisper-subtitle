@@ -23,6 +23,19 @@ COPY . .
 # Création du dossier temporaire pour les uploads avec les droits d'écriture
 RUN mkdir -p uploads && chmod 777 uploads
 
+# Création du fichier de config Streamlit robuste pour Mobile + Hugging Face
+RUN mkdir -p .streamlit && echo "\
+[server]\n\
+maxUploadSize = 1024\n\
+enableCORS = false\n\
+enableXsrfProtection = false\n\
+enableWebsocketCompression = false\n\
+socketTimeout = 3600\n\
+\n\
+[browser]\n\
+gatherUsageStats = false\n\
+" > .streamlit/config.toml
+
 # Port exposé par défaut pour Streamlit
 EXPOSE 7860
 
@@ -30,5 +43,5 @@ EXPOSE 7860
 ENV STREAMLIT_SERVER_PORT=7860
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
 
-# Lancement de l'application avec les réglages CORS pour Hugging Face
-CMD ["streamlit", "run", "app.py", "--server.port=7860", "--server.address=0.0.0.0", "--server.enableCORS=false", "--server.enableXsrfProtection=false"]
+# Lancement de l'application (les configs sont dans .streamlit/config.toml)
+CMD ["streamlit", "run", "app.py"]
