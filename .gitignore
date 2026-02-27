@@ -1,31 +1,38 @@
-# Python
+```
+# Compiled Python files
+*.pyc
 __pycache__/
-*.py[cod]
-*$py.class
 
-# Virtual Environments
+# Dependencies
 .venv/
 venv/
-env/
-ENV/
-uploads/*
-# Environment Variables
+node_modules/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# Environment files
 .env
-.streamlit/secrets.toml
+.env.local
+*.env.*
 
-# Translation cache
-translations_cache.json
+# Editors
+.vscode/
+.idea/
 
-# Media Files (inputs/outputs)
-*.mp4
-*.mkv
-*.avi
-*.mov
-*.wav
-*.mp3
-*.flac
-*.aac
+# Build artifacts
+dist/
+build/
+target/
 
-# OS metadata
-.DS_Store
-Thumbs.db
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
+
+# Python cache
+.mypy_cache/
+.pytest_cache/
+```
